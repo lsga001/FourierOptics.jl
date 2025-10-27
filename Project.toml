@@ -1,9 +1,13 @@
 name = "FourierOptics"
 uuid = "71989ec4-0871-4206-b28d-b1cc0502df26"
 authors = ["leo"]
-version = "1.0.0-DEV"
+version = "0.0.0-DEV"
+
+[deps]
+FromFile = "ff7dd447-1dcb-4ce3-b8ac-22a812192de7"
 
 [compat]
+FromFile = "0.1.6"
 julia = "1.6.7"
 
 [extras]
