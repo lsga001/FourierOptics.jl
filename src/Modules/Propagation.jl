@@ -1,8 +1,8 @@
 module Propagation
 
 import FromFile: @from
-@from "./Core.jl" import Core
-@from "./utils/Fourier.jl" import Fourier
+@from "./Core.jl" using Core
+@from "./utils/Fourier.jl" using Fourier
 
 export Fourier
 
