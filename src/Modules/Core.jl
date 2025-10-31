@@ -1,5 +1,7 @@
 module Core
 
+export NumericalWindow, MonoBeam, LaserSource
+
 struct NumericalWindow
   xv
   yv

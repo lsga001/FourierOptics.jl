@@ -2,8 +2,9 @@ module Propagation
 
 import FromFile: @from
 @from "./Core.jl" import Core
+@from "./utils/Fourier.jl" import Fourier
 
-export important_function
+export Fourier
 
 function f2f()
 end
