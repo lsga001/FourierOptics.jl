@@ -1,7 +1,7 @@
 module FourierOptics
 
 import FromFile: @from
-@from "utils/core.jl" import Propagation
+@from "Modules/Core.jl" import Propagation
 
 export Propagation
 

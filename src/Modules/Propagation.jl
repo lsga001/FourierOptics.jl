@@ -5,7 +5,7 @@ import FromFile: @from
 
 export important_function
 
-function important_function()
+function f2f()
 end
 
 end

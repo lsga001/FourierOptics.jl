@@ -1,13 +1,18 @@
 module Core
 
+struct NumericalWindow
+  xv
+  yv
+end
+
 struct LaserSource
-  wavelength
+  frequency
   power
 end
 
 struct MonoBeam
   amplitude
-  angularfrequency
+  frequency
 end
 
 end
