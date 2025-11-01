@@ -34,27 +34,53 @@ function bluestein_scalar(
   uv = output_window.xv;
   vv = output_window.yv;
 
-  F0(x,y) = exp(im*k*z)/(im*lambda*z) * exp(im*k*(x^2 + y^2)/(2*z));
-  F(u,v) = exp(im*pi*(u^2 + v^2)/(lambda*z));
+  Nx = length(xv);
+  Ny = length(yv);
+  Mx = length(uv);
+  My = length(vv);
+
+  F0(u,v) = exp(im*k*z)/(im*lambda*z) * exp(im*k*(u^2 + v^2)/(2*z));
+  F(x,y) = exp(im*pi*(x^2 + y^2)/(lambda*z));
 
   dx = xv[2] - xv[1];
   dy = yv[2] - yv[1];
-  fxs = lambda*z/dx;
-  fys = lambda*z/dy;
 
-  fx1 = uv[1]+fxs/2;
-  fx2 = uv[end]+fxs/2;
-  fy1 = vv[1]+fys/2;
-  fy2 = vv[end]+fys/2;
+  fxs = 1/dx;
+  fys = 1/dy;
 
-  E = F0.(xv, yv') .* fft2_bluestein(E0 .* F.(uv, vv'), fx1, fx2, fxs, fy1, fy2, fys);
+  fx = uv./(z*lambda);
+  fy = vv./(z*lambda);
 
-  return MonoBeam(E, nu)
+  dfx = 1/(xv[end]-xv[1]);
+  dfy = 1/(yv[end]-yv[1]);
+
+  fx_zfft = fftfreq_bluestein(fx[1], fx[end], Mx);
+  fy_zfft = fftfreq_bluestein(fy[1], fy[end], My);
+  dfx_zfft = fx_zfft[2] - fx_zfft[1];
+  dfy_zfft = fy_zfft[2] - fy_zfft[1];
+  x_shift = xv[1];
+  y_shift = yv[1];
+ 
+  u = fx_zfft*(z*lambda);
+  v = fy_zfft*(z*lambda);
+
+  P_shift(fxx, fyy) = exp(-im*2*pi*x_shift*fxx - im*2*pi*y_shift*fyy);
+
+  E = F0.(u', v) .* fft2_bluestein(E0 .* F.(xv', yv), fx, fxs, fy, fys);
+
+  E = dx*dy*P_shift.(fx_zfft', fy_zfft) .* E;
+
+  return u, v, MonoBeam(E, nu)
 end
 
-function fft2_bluestein(U, fx1, fx2, fxs, fy1, fy2, fys)
-  (Nx, Ny) = size(U);
-  return fft_bluestein(fft_bluestein(U, fx1, fx2, fxs, Nx; axis=1), fy1, fy2, fys, Ny; axis=2)
+function fft2_bluestein(U, fx, fxs, fy, fys)
+  fx1 = fx[1];
+  fx2 = fx[end];
+  Mx = length(fx);
+  fy1 = fy[1];
+  fy2 = fy[end];
+  My = length(fy);
+  return fft_bluestein(fft_bluestein(U, fx1, fx2, fxs, Mx; axis=1), fy1, fy2, fys, My; axis=2)
 end
 
 function fft_bluestein(x,f1,f2,fs,M;axis=1)
@@ -62,13 +88,14 @@ function fft_bluestein(x,f1,f2,fs,M;axis=1)
   Based almost 1 to 1 on the code of Rafael Fuente in his Github 
   repository "diffractsim" and the relevant papers with some 
   minor modifications.
-  """
+  """ 
   if axis == 1
-    print(shape(x))
     x = permutedims(x, [1,2]);
   else axis == 2
     x = permutedims(x, [2,1]);
   end
+
+  N = size(x,1); # input size along first dimension
 
   phi1 = 2*pi*f1/fs;
   phi2 = 2*pi*f2/fs;
@@ -78,8 +105,8 @@ function fft_bluestein(x,f1,f2,fs,M;axis=1)
   A = A0*exp(im * phi1);
   W = W0*exp(-im * (phi2-phi1)/M);
 
-  #X = czt(x,M,A,W);
-  X = mapslices(u->czt(u,M,A,W), x; dims=ndims(x));
+  fv = range(f1, f2, M);
+  X = mapslices(u->czt(u,M,A,W), x; dims=1);
 
   if axis == 1
     X = permutedims(X, [1,2]);
@@ -88,6 +115,11 @@ function fft_bluestein(x,f1,f2,fs,M;axis=1)
   end
  
   return X;
+end
+
+function fftfreq_bluestein(f1, f2, M)
+  df = (f2 - f1) / (M-1);
+  return f1 .+ range(0,M-1).*df
 end
 
 function czt(x, M, A, W)
@@ -165,13 +197,13 @@ function circulant_multiply(c, x)
 	"""
 	n = length(c);
 	#assert(length(x)=n)
-	C = fft(c);
-	X = fft(x);
+  C = fft(c);
+  X = fft(x);
 	Y = zeros(ComplexF64, n);
 	for i in range(1, n)
 		Y[i] = C[i]*X[i];
 	end
-	y = ifft(Y);
+  y = ifft(Y);
 	return y
 end
 
