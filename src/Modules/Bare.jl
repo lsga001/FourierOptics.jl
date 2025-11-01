@@ -1,4 +1,4 @@
-module Core
+module Bare
 
 export NumericalWindow, MonoBeam, LaserSource
 

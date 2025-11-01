@@ -1,7 +1,7 @@
 module Fourier
 
 import FromFile: @from
-@from "../Core.jl" using Core
+@from "../Bare.jl" using Bare
 
 export fft2, 
        ifft2, 
