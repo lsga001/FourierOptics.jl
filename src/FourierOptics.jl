@@ -5,9 +5,9 @@ import FromFile: @from
 @from "Modules/Propagation.jl" import Propagation
 
 using Reexport
-@reexport using Bare
-@reexport using Propagation
-@reexport using Fourier
+@reexport using .Bare
+@reexport using .Propagation
+@reexport using .Fourier
 
 export Bare, Propagation, Fourier
 

@@ -1,5 +1,7 @@
 module Fourier
 
+using FFTW
+
 import FromFile: @from
 @from "../Bare.jl" using Bare
 
@@ -11,63 +13,6 @@ export fft2,
        fft2_bluestein,
        bluestein_scalar
 
-function fft2(g, delta)
-  return fftshift(fft(fftshift(g)))*delta^2;
-end
-
-function ifft2(G, delta_f)
-  N = size(G, 1);
-  return ifftshift(ifft(ifftshift(G)))*(N*delta_f)^2;
-end
-
-function czt(x, A, W, M)
-  # simple algorithm
-  k = range(0, length=M);
-  X = zeros(M);
-  z = A*W^(-k);
-  for n in range(0, length=N)
-    X += x[n] * z^(-n);
-  end
-end
-
-function chirpz(x,A,W,M)
-  L = int(2^ceil(log2(M+N-1)));
-  n = range(0,length=N);
-  y = A^(-n) * W^(n^2/2) * x;
-  Y = fft(y, L);
-
-  v = zeros(L);
-  v[1:M] = W^(-n[1:M]^2/2);
-  v[L-N+1:end] = W^(-n[N-1:0:end]^2/2);
-  V = fft(v);
-
-  g = ifft(V*Y)[1:M];
-  k = range(0, M);
-  g *= W^(k^2/2);
-  return g;
-end
-
-function fft_bluestein(x,f1,f2,fs,M;axis=0)
-  """
-  Based almost 1 to 1 on the code of Rafael Fuente in his Github 
-  repository "diffractsim".
-  """
-  phi1 = 2*pi*f1/fs;
-  phi2 = 2*pi*f2/fs;
-
-  A0 = 1; W0 = 1;
-
-  A = A0*exp(im * phi1);
-  W = W0*exp(-im * (phi2-phi1)/(M-1)); # M-1 since we count segments, not points
-  #return X = czt(x, A, W, M);
-  return X = chirpz(x, A, W, M);
-end
-
-function fft2_bluestein(U, fx1, fx2, fxs, fy1, fy2, fys)
-  (Nx, Ny) = size(U);
-  return fft_bluestein(fft_bluestein(U, fx1, fx2, fxs, Nx, axis=0), fy1, fy2, fys, Ny, axis=1)
-end
-
 function bluestein_scalar(
     Input::MonoBeam,
     z::Real,
@@ -77,9 +22,10 @@ function bluestein_scalar(
   Light: Science and Applications, DOI:10.1038/s41377-020-00362-z"""
   # The basic algorithm can be described as E = F0 x fft2(E0 x F)
 
-  c = 299792458;
-
+  E0 = Input.amplitude;
   nu = Input.frequency;
+ 
+  c = 299792458;
   lambda = c/nu;
   k = 2*pi/lambda;
 
@@ -89,7 +35,7 @@ function bluestein_scalar(
   vv = output_window.yv;
 
   F0(x,y) = exp(im*k*z)/(im*lambda*z) * exp(im*k*(x^2 + y^2)/(2*z));
-  F(u,v) = exp(im*k*(u^2 + v^2)/(2*z));
+  F(u,v) = exp(im*pi*(u^2 + v^2)/(lambda*z));
 
   dx = xv[2] - xv[1];
   dy = yv[2] - yv[1];
@@ -98,10 +44,184 @@ function bluestein_scalar(
 
   fx1 = uv[1]+fxs/2;
   fx2 = uv[end]+fxs/2;
-  fy1 = vv[1]+fxy/2;
-  fy2 = vv[end]+fxy/2;
+  fy1 = vv[1]+fys/2;
+  fy2 = vv[end]+fys/2;
 
-  return F0.(xv, yv') .* fft2_bluestein(Input .* F.(uv, vv'),fx1,fx2,fxs,fy1,fy2,fys);
+  E = F0.(xv, yv') .* fft2_bluestein(E0 .* F.(uv, vv'), fx1, fx2, fxs, fy1, fy2, fys);
+
+  return MonoBeam(E, nu)
 end
+
+function fft2_bluestein(U, fx1, fx2, fxs, fy1, fy2, fys)
+  (Nx, Ny) = size(U);
+  return fft_bluestein(fft_bluestein(U, fx1, fx2, fxs, Nx; axis=1), fy1, fy2, fys, Ny; axis=2)
+end
+
+function fft_bluestein(x,f1,f2,fs,M;axis=1)
+  """
+  Based almost 1 to 1 on the code of Rafael Fuente in his Github 
+  repository "diffractsim" and the relevant papers with some 
+  minor modifications.
+  """
+  if axis == 1
+    print(shape(x))
+    x = permutedims(x, [1,2]);
+  else axis == 2
+    x = permutedims(x, [2,1]);
+  end
+
+  phi1 = 2*pi*f1/fs;
+  phi2 = 2*pi*f2/fs;
+
+  A0 = 1; W0 = 1;
+
+  A = A0*exp(im * phi1);
+  W = W0*exp(-im * (phi2-phi1)/M);
+
+  #X = czt(x,M,A,W);
+  X = mapslices(u->czt(u,M,A,W), x; dims=ndims(x));
+
+  if axis == 1
+    X = permutedims(X, [1,2]);
+  else axis == 2
+    X = permutedims(X, [2,1]);
+  end
+ 
+  return X;
+end
+
+function czt(x, M, A, W)
+  """
+  Compute the chirp z transform (czt) of x.
+  """
+  N = length(x);
+	X = zeros(ComplexF64, N);
+	r = zeros(ComplexF64, N);
+	c = zeros(ComplexF64, M);
+
+	for i in range(1, stop=N)
+		k = i-1;
+		X[i] = W^(k^2/2) * A^(-k) * x[i];
+		r[i] = W^(-k^2/2);
+	end
+	
+	for i in range(1, stop=M)
+		k = i-1;
+		c[i] = W^(-k^2/2);
+	end
+
+	# After the next line, Length(X) = M.
+	X = toeplitz_multiply_E(r, c, X);
+
+	for i in range(1, stop=M)
+		k = i-1;
+		X[i] = W^(k^2/2) * X[i];
+	end
+	
+	return X
+end
+
+function toeplitz_multiply_E(r, c, x)
+	"""Compute the product y = Tx of a Toeplitz matrix T and a vector x, where T is specified by its first row 
+	r = (r[0], r[1], r[2], . . . , r[N −1]) and its first column
+	c = (c[0], c[1], c[2], . . . , c[M −1]), where r[0] = c[0].
+	"""
+	N = length(r);
+	M = length(c);
+	#assert(r[0]=c[0])
+	#assert(length(x)=N)
+	n = Integer(2^ceil(log2(M+N-1)));
+	
+	# Form an array c_hat by concatenating c, n − (M +N −1)
+	# zeros, and the reverse of the last N −1 elements of r.
+	c_hat = zeros(ComplexF64, n);
+	
+	for i in range(1, stop=M)
+		c_hat[i] = c[i];
+	end
+	
+	for i in range(2, stop=N)
+		c_hat[n-i+2] = r[i];   # careful with indeces
+	end
+	
+	x_hat = zeropad(x, n);
+	y_hat = circulant_multiply(c_hat, x_hat);
+
+	# The result is the first M elements of y_hat
+	y = zeros(ComplexF64, M);
+	for i in range(1, stop=M)
+		y[i] = y_hat[i];
+	end
+	
+	return y
+end
+
+function circulant_multiply(c, x)
+	"""
+	CIRCULANTMULTIPLY(c, x) // runs in O(n log n) time
+	Compute the product y = Gx of a circulant matrix G
+	and a vector x, where G is generated by its first column
+	c = (c[0], c[1], . . . , c[n−1]).
+	"""
+	n = length(c);
+	#assert(length(x)=n)
+	C = fft(c);
+	X = fft(x);
+	Y = zeros(ComplexF64, n);
+	for i in range(1, n)
+		Y[i] = C[i]*X[i];
+	end
+	y = ifft(Y);
+	return y
+end
+
+function zeropad(x, n)
+	m = length(x);
+	#assert(m<=n)
+	x_hat = zeros(ComplexF64, n);
+	for i in range(1, stop=m)
+		x_hat[i] = x[i];
+	end
+	for i in range(m+1, stop=n)
+		x_hat[i] = 0;
+	end
+	return x_hat
+end
+
+function fft2(g, delta)
+  return fftshift(fft(fftshift(g)))*delta^2;
+end
+
+function ifft2(G, delta_f)
+  N = size(G, 1);
+  return ifftshift(ifft(ifftshift(G)))*(N*delta_f)^2;
+end
+
+#function czt(x, A, W, M)
+#  # simple algorithm
+#  k = range(0, length=M);
+#  X = zeros(M);
+#  z = A*W^(-k);
+#  for n in range(0, length=N)
+#    X += x[n] * z^(-n);
+#  end
+#end
+#
+#function chirpz(x,A,W,M)
+#  L = int(2^ceil(log2(M+N-1)));
+#  n = range(0,length=N);
+#  y = A^(-n) * W^(n^2/2) * x;
+#  Y = fft(y, L);
+#
+#  v = zeros(L);
+#  v[1:M] = W^(-n[1:M]^2/2);
+#  v[L-N+1:end] = W^(-n[N-1:0:end]^2/2);
+#  V = fft(v);
+#
+#  g = ifft(V*Y)[1:M];
+#  k = range(0, M);
+#  g *= W^(k^2/2);
+#  return g;
+#end
 
 end
